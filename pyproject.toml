@@ -1,0 +1,14 @@
+[project]
+name = "frida-xj-use"
+version = "1.0.0"
+description = "Minimal Android arm64 usage templates for the delivered Frida XJ runtime"
+requires-python = ">=3.13"
+dependencies = [
+    "frida==17.9.1",
+    "frida-tools==14.8.2",
+]
+
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true

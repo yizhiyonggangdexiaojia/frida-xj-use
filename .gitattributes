@@ -1,0 +1,6 @@
+* text=auto
+*.js text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.lock text eol=lf
+frida-usb text eol=lf
