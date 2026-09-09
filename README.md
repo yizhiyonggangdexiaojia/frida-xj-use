@@ -15,7 +15,10 @@ Android arm64 发布版 Frida XJ 的最小使用工程。仓库只包含主机�
 │   └── _agent.js
 ├── scripts/
 │   ├── java-hook.js
-│   └── native-hook.js
+│   ├── native-hook.js
+│   └── java-native-hook.js
+├── screenshots/
+├── JAVA-NATIVE-HOOK-DEMO.md
 ├── .python-version
 ├── pyproject.toml
 └── uv.lock
@@ -23,10 +26,13 @@ Android arm64 发布版 Frida XJ 的最小使用工程。仓库只包含主机�
 
 | 文件 | 用途 |
 | --- | --- |
-| `frida-usb` | 激活、授权、启动、停止设备端 server，并建立 ADB 转发 |
+| `frida-usb` | 激活、授权、启动、停止设备端 server,并建立 ADB 转发 |
 | `frida-java-bridge/_agent.js` | Java 脚本必须一同加载的预构建 bridge |
 | `scripts/java-hook.js` | `Log.i(String, String)` Java Hook 示例 |
 | `scripts/native-hook.js` | `libc.so!open` Native Hook 示例 |
+| `scripts/java-native-hook.js` | 同会话 Java + Native 三定点组合演示脚本 |
+| `JAVA-NATIVE-HOOK-DEMO.md` | 四个真实海外 App 的组合 Hook 实测记录(含日志与截图) |
+| `screenshots/` | 实测演示的 App 存活截图 |
 | `pyproject.toml` / `uv.lock` | 固定 Frida Python 与 CLI 版本 |
 
 当前 `_agent.js` SHA-256：
@@ -211,6 +217,10 @@ Java.enableJvmti();
 ```
 
 启用 JVMTI 可能改变应用启动耗时和运行时状态。
+
+同一个脚本内同时安装 Java 与 Native Hook 的组合示例是
+`scripts/java-native-hook.js`(三个定点钩子 + 存活心跳);在四个真实海外 App 上的
+实测记录(日志与存活截图)见 [JAVA-NATIVE-HOOK-DEMO.md](JAVA-NATIVE-HOOK-DEMO.md)。
 
 ## 8. 自定义模板
 
