@@ -1,5 +1,7 @@
 # frida-xj-use
 
+> 禁止将本项目用于任何违法犯罪活动。
+
 Android arm64 发布版 Frida XJ 的最小使用工程。仓库只包含主机端环境、USB
 启动脚本、已构建的 Java bridge 和基础 Hook 模板，不包含内核模块或
 `frida-server`。
