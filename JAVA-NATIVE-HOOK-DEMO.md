@@ -1,52 +1,65 @@
-# Java + Native 组合 Hook 实测演示
+# Java + Native 组合 Hook 实测
 
-> 2026-09-09 实测记录。设备:Pixel 6 / Android 14 / arm64(已 root,内核模块已启用)。
-> Frida `17.9.1`,Java bridge 为仓库内置 `_agent.js`。
+本文只记录 `scripts/java-native-hook.js` 的实测方法和证据。环境准备、激活、启停、
+独立 Java/Native 示例及故障处理统一见 [README](README.md)；脚本的当前行为以
+[`scripts/java-native-hook.js`](scripts/java-native-hook.js) 为准。
 
-本页记录同一 Frida 会话内 **Java Hook 与 Native Hook 同时安装、同时触发** 的实测过程,
-目标为四个真实发行的海外 App(含银行与游戏),全部使用仓库自带脚本,未做任何针对性绕过。
+## 测试方法
 
-## 演示脚本
+测试时间为 2026-09-09，环境如下：
 
-`scripts/java-native-hook.js` 一共安装三个定点 Hook:
+| 项目 | 值 |
+| --- | --- |
+| 设备 | Pixel 6 |
+| 系统 | Android 14 / arm64 |
+| 权限 | 已 root，配套内核模块已启用 |
+| Frida | `17.9.1` |
+| Java bridge | 仓库内置 `_agent.js` |
+| 单轮观察窗口 | 60 秒 |
 
-| 钩子 | 层 | 形式 | 说明 |
-|---|---|---|---|
-| `libc.so!open` | Native | `Interceptor.attach` + `textShadow` | 观察文件打开,回调限流打印前 8 条 |
-| `android.app.Activity.onResume()` | Java | `.implementation` | 打印实际 resumed 的 Activity 类名 |
-| `android.util.Log.i(String, String)` | Java | 静态方法 `.implementation` | 打印 tag 和 message,限流前 8 条 |
+脚本在同一 Frida 会话中安装三个定点 Hook：
 
-回调全部为纯 JavaScript,不使用 CModule;每 10 秒输出一条心跳,携带三类 Hook 的
-累计命中数,作为进程存活与注入持续生效的直接证据。
+| 钩子 | 层 | 形式 | 观测内容 |
+| --- | --- | --- | --- |
+| `libc.so!open` | Native | `Interceptor.attach` + `textShadow` | 文件打开；只打印前 8 条 |
+| `android.app.Activity.onResume()` | Java | `.implementation` | resumed Activity 类名 |
+| `android.util.Log.i(String, String)` | Java | 静态方法 `.implementation` | tag 与 message；只打印前 8 条 |
 
-统一执行命令(先加载 bridge,再加载用户脚本):
+回调均为 JavaScript，不使用 CModule。脚本每 10 秒输出三类 Hook 的累计命中数和当前
+PID，用于确认会话仍存活且两条 Hook 链路持续工作。
+
+执行命令：
 
 ```bash
-PACKAGE="<目标包名>"
+PACKAGE="<TARGET_PACKAGE>"
 uv run frida -H 127.0.0.1:27042 \
   -f "$PACKAGE" \
   -l frida-java-bridge/_agent.js \
   -l scripts/java-native-hook.js
 ```
 
-观察窗口为 60 秒;存活判定使用 `adb shell pidof "$PACKAGE"` 与脚本内心跳双通道。
+存活判定同时参考脚本心跳和设备端进程状态。目标若修改进程名，以心跳中的 PID 反查
+`/proc/<pid>/comm`，不只依赖 `pidof "$PACKAGE"`。
 
-## 目标与结果总览
+## 结果总览
 
-| App | 包名 | 地区 | 已知保护 | Native `open` 命中 | Java 命中(onResume / Log.i) | 注入窗口内存活 | detach 后存活 |
-|---|---|---|---|---|---|---|---|
-| Hay Day | `com.supercell.hayday` | 芬兰 Supercell | Promon SHIELD | 1194 | 2 / 26 | 是 | 是 |
-| Paytm | `net.one97.paytm` | 印度 | 自研 cachehandler | 4348 | 3 / 13 | 是 | 否(进程自行退出) |
-| Livin' by Mandiri | `id.bmri.livin` | 印尼 | DexGuard + 自研 | 384 | 1 / 6 | 是 | 是 |
-| K PLUS | `com.kasikorn.retail.mbanking.wap` | 泰国开泰银行 | DexProtector + VOS | 435 | 4 / 1 | 是(三进程) | 是(三进程) |
+下表命中数统一取日志中的 60 秒心跳，避免混用会话结束时的最终计数。
 
-四轮组合注入全部成功:两条 Hook 链路同时工作,窗口内无一崩溃、无一被杀。
+| App | 包名 | 已知保护 | `open` | `onResume` / `Log.i` | 60 秒内存活 | detach 后存活 |
+| --- | --- | --- | ---: | ---: | --- | --- |
+| Hay Day | `com.supercell.hayday` | Promon SHIELD | 1194 | 2 / 26 | 是 | 是 |
+| Paytm | `net.one97.paytm` | 自研 cachehandler | 4311 | 3 / 12 | 是 | 否，进程自行退出 |
+| Livin' by Mandiri | `id.bmri.livin` | DexGuard + 自研 | 384 | 1 / 6 | 是 | 是 |
+| K PLUS | `com.kasikorn.retail.mbanking.wap` | DexProtector + VOS | 435 | 4 / 1 | 是，三进程 | 是，三进程 |
 
-## 逐目标日志摘录
+四个目标在本次 60 秒窗口内均完成 Java 与 Native Hook 安装和触发，未观察到崩溃或
+被杀。
 
-以下为真实终端输出的删节(去掉 REPL 横幅,保留全部关键行)。
+## 日志与截图
 
-### 1. Hay Day(Promon SHIELD)
+日志均为终端输出删节，省略 REPL 横幅，只保留安装、命中和心跳行。
+
+### Hay Day
 
 ```text
 Spawning `com.supercell.hayday`...
@@ -63,11 +76,11 @@ Spawned `com.supercell.hayday`. Resuming main thread!
 [alive] 60s pid=4538 native_open=1194 onResume=2 Log_i=26
 ```
 
-进程 4538 在注入中与 frida 退出后均存活。截图(t≈22s,游戏主场景正常渲染):
+进程在注入期间和会话结束后均存活。截图采集于约 22 秒：
 
 <img src="screenshots/hayday.png" width="280" alt="Hay Day alive" />
 
-### 2. Paytm(印度)
+### Paytm
 
 ```text
 Spawning `net.one97.paytm`...
@@ -81,27 +94,13 @@ Spawning `net.one97.paytm`...
 [alive] 60s pid=8953 native_open=4311 onResume=3 Log_i=12
 ```
 
-三轮运行结果一致。两个值得记录的现象:
-
-1. **进程名伪装**:`pidof net.one97.paytm` 与按名 `ps` 都找不到进程,但脚本心跳持续
-   到 60 秒。以心跳 pid 反查 `/proc/<pid>/`:
-
-   ```text
-   # cat /proc/<pid>/cmdline
-   com.android.chrome:sandboxed_process0      # 伪装成 Chrome 沙箱进程
-   # cat /proc/<pid>/comm
-   net.one97.paytm                            # comm 仍是真实包名
-   ```
-
-   判定 Paytm 存活应以脚本内心跳(携带真实 pid)或按 `comm` 查询为准。
-2. **frida 退出后进程消失**:脚本卸载、会话结束后进程随即退出。窗口内(60 秒)
-   行为完全正常,该现象属于 detach 之后的目标自身行为。
-
-截图(t≈22s,启动页正常渲染):
+该目标的 `cmdline` 在测试中显示为 Chrome 沙箱进程名，但 `/proc/<pid>/comm` 仍为
+`net.one97.paytm`，因此存活状态以脚本心跳 PID 和 `comm` 交叉确认。三轮结果一致；
+会话结束后目标进程自行退出。
 
 <img src="screenshots/paytm.png" width="280" alt="Paytm alive" />
 
-### 3. Livin' by Mandiri(印尼)
+### Livin' by Mandiri
 
 ```text
 Spawning `id.bmri.livin`...
@@ -115,13 +114,11 @@ Spawning `id.bmri.livin`...
 [alive] 60s pid=29784 native_open=384 onResume=1 Log_i=6
 ```
 
-进程 29784 注入中与 detach 后均存活。截图(t≈22s,欢迎页正常渲染):
+进程在注入期间和会话结束后均存活。
 
 <img src="screenshots/livin.png" width="280" alt="Livin alive" />
 
-### 4. K PLUS(泰国开泰银行,DexProtector + VOS)
-
-组合脚本:
+### K PLUS
 
 ```text
 Spawning `com.kasikorn.retail.mbanking.wap`...
@@ -135,51 +132,16 @@ Spawning `com.kasikorn.retail.mbanking.wap`...
 [alive] 60s pid=4239 native_open=435 onResume=4 Log_i=1
 ```
 
-K PLUS 为三进程应用,`pidof` 返回三个 pid,注入中与 detach 后全部存活。
-
-截图由 root `screencap` 采集:K PLUS 的验证页设置了 `FLAG_SECURE`,普通
-`adb exec-out screencap` 对该页面输出空文件,root 截图正常:
+该目标在测试中包含三个进程，注入期间和会话结束后均保持存活。验证页设置了
+`FLAG_SECURE`，下图由 root `screencap` 采集：
 
 <img src="screenshots/kplus.png" width="280" alt="K PLUS alive" />
 
-> 注:该截图含手机号输入页,公开引用前请先确认画面内容是否需要处理。
+> 该截图包含手机号输入页，公开引用前应再次检查画面内容。
 
-## 配套现有观察脚本
+## 结论边界
 
-主 toolkit 仓库 `scripts/` 下针对 K PLUS 的两个纯 Native 观察脚本同样验证通过
-(spawn,不加载 bridge):
-
-```bash
-uv run frida -H 127.0.0.1:27042 \
-  -f com.kasikorn.retail.mbanking.wap \
-  -l scripts/dexprotect-analysis/index.js
-```
-
-```text
-[Remote::com.kasikorn.retail.mbanking.wap ]-> .../lib/arm64/libdpboot.so
-.../lib/arm64/libdexprotector.so
-hook success                          # libdexprotector.so!JNI_OnLoad 已钩上
-.../lib/arm64/libdexprotector.53y4.so
-```
-
-```bash
-uv run frida -H 127.0.0.1:27042 \
-  -f com.kasikorn.retail.mbanking.wap \
-  -l scripts/vos-analysis/index.js
-```
-
-```text
-.../lib/arm64/libvosWrapperEx.so
-hook success                          # libvosWrapperEx.so!JNI_OnLoad 已钩上
-```
-
-两个脚本通过 `__loader_android_dlopen_ext` 等待目标保护库加载,再对其
-`JNI_OnLoad` 安装钩子;`hook success` 即为注入成功的直接标志。两轮运行中
-App 三进程全程存活。
-
-## 观察边界
-
-- 每轮观察窗口为 60 秒,属于点查(spont check),不代表数分钟级长跑兼容性结论;
-  建立长跑结论需要按用户指南分别建立无注入、零 Hook、仅 bridge、最小脚本四组基线。
-- `[object Object]` 一行是 `_agent.js` 初始化时输出的状态对象,属正常现象。
-- 所有命令使用示例变量,未包含激活码、设备序列号或其他敏感值。
+- 结果只覆盖表中环境、目标版本和 60 秒观察窗口，属于点查，不代表长期兼容性。
+- 命中数只描述当前进程、当前地址和当前观测窗口，不能证明未 Hook 路径没有执行。
+- 更换设备、系统、App 版本、启动方式或 Hook 组合后，应按 README 重新建立四组基线。
+- `_agent.js` 初始化时可能输出 `[object Object]`，本次测试中该行不影响 Hook 安装。
