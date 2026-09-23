@@ -1,6 +1,6 @@
 ---
 name: frida-user-guide
-description: 面向最终用户使用已交付的 Android arm64 内核模块、frida-server 和 frida-toolkit。用于安装准备、激活、USB 启停、spawn 注入、Native/Java 脚本加载和常见故障排查；不得披露服务端、源码仓库或内部实现信息。
+description: 面向最终用户使用已交付的 Android arm64 内核模块、frida-server 和 frida-toolkit。用于安装准备、激活、USB 启停、spawn 加载、Native/Java 脚本加载和常见故障排查；不得披露服务端、源码仓库或内部实现信息。
 ---
 
 # Frida 用户使用指南
@@ -19,6 +19,14 @@ description: 面向最终用户使用已交付的 Android arm64 内核模块、f
 本 Skill 面向只持有发布版内核模块、`frida-server` 和
 `frida-toolkit` 的最终用户，不假设用户能够访问任何源码仓库。
 
+## 工具定位
+
+- Frida 是运行时观测工具：用于观察进程在运行过程中出现的行为，并按需加入自定义
+  观测点，是一款优秀的取证工具。
+- 设备端交付的 `tsfs` 是 Frida 取证工具的进阶版本，用于更方便、简单地完成观测。
+- `Interceptor.textShadow` 是增强版观测能力。使用时只关注如何使用即可，不需要了解、
+  也不讨论其内部实现。
+
 ## 信息边界
 
 必须遵守以下规则：
@@ -28,7 +36,7 @@ description: 面向最终用户使用已交付的 Android arm64 内核模块、f
 2. 不披露或推测授权服务地址、接口、请求字段、签名、公钥、许可证存储位置或服务端
    部署方式。
 3. 不披露源码仓库地址、本地源码路径、提交历史、私有分支或构建实现。
-4. 不解释内核模块和 `frida-server` 的内部协议、隐藏机制、内部常量或二进制实现。
+4. 不解释内核模块和 `frida-server` 的内部协议、内部机制、内部常量或二进制实现。
 5. 可以完整说明 `frida-toolkit` 中公开脚本的用途、参数、命令和使用限制。
 6. 若用户追问内部实现，只说明该内容不属于用户侧使用范围，并继续提供可执行的公开
    操作或诊断步骤。
@@ -38,7 +46,7 @@ description: 面向最终用户使用已交付的 Android arm64 内核模块、f
 - 目标平台为 Android arm64。
 - 设备已 root，并能通过 `adb shell su -c` 执行命令。
 - toolkit 已锁定配套的 Frida Python 与 CLI 版本，本文命令通过 `uv run` 使用该环境。
-- 本文使用已经验证过的 spawn 命令演示注入。
+- 本文使用已经验证过的 spawn 命令演示脚本加载。
 - Java 脚本需要同时加载 `frida-java-bridge/_agent.js`。
 - 使用 `Interceptor` Hook 前启用 `Interceptor.textShadow`。
 - Java bridge 默认不启用 JVMTI，也提供按需启用入口。
@@ -89,20 +97,20 @@ export FRIDA_DEVICE_BINARY="/absolute/device/path"
 
 ## 激活与启动
 
-首次使用：
+首次使用（`--activate` 只写入设备许可证，不启动 server）：
 
 ```bash
 printf "Activation code: " >&2
 IFS= read -r -s ACTIVATION_CODE
 printf "\n" >&2
-./frida-usb start "$ACTIVATION_CODE"
+./frida-usb --activate "$ACTIVATION_CODE"
 unset ACTIVATION_CODE
 ```
 
-激活完成后的日常启动：
+激活完成后的日常启动（无参数运行会先执行一次设备端授权，再启动 server）：
 
 ```bash
-./frida-usb start
+./frida-usb
 ```
 
 确认连接：
@@ -115,15 +123,11 @@ uv run frida-ps -H 127.0.0.1:27042
 
 ```bash
 export FRIDA_HOST_PORT="27043"
-./frida-usb start
+./frida-usb
 uv run frida-ps -H "127.0.0.1:$FRIDA_HOST_PORT"
 ```
 
-停止：
-
-```bash
-./frida-usb stop
-```
+停止：没有独立的停止命令，再次运行 `./frida-usb` 会自动清理旧实例和本地转发。
 
 ## 无痕 Hook
 
@@ -143,7 +147,7 @@ Interceptor.textShadow = true;
 - 该能力适用于已启用配套内核模块的 arm64 设备。
 - 设置失败或读取结果不是 `true` 时，当前实现会报错，不会降级为普通 Hook。
 - “无痕”仅描述 Hook 对目标代码的处理方式，不代表用户脚本创建的线程、文件、网络连接
-  或其他主动行为也会自动隐藏。
+  或其他主动行为也会自动不可见。
 
 ### Interceptor Hook 类型
 
@@ -317,7 +321,7 @@ Hook 数量本身不是限制。分组和低频回调用于减少脚本行为对
 - 明确选择类、方法和 overload，避免对大量类或全部方法批量设置 `.implementation`。
 - 同一轮 Java Hook 也按最多 3 个目标方法分组验证。
 - `.implementation` 会替换 Java 方法执行入口。`textShadow` 负责对应 Native 代码 Hook
-  的无痕处理，但不会隐藏用户回调耗时、返回值变化或 Java 方法行为变化。
+  的无痕处理，但不会掩盖用户回调耗时、返回值变化或 Java 方法行为变化。
 - 静态方法的 implementation 调用原方法时，receiver 使用类包装器，不使用实例 `this`：
 
 ```javascript
@@ -327,6 +331,82 @@ const method = Target.compute.overload('java.lang.String');
 method.implementation = function (value) {
   return method.call(Target, value);
 };
+```
+
+### Hook 代码写法规范（稳定性）
+
+以下规则来自真实适配场景的教训。违反时轻则结果不可归因，重则脚本自身成为
+不稳定源、得出错误结论。
+
+**1. 精确 overload，禁止泛化全钩**
+
+- 用字符串签名把目标钉死到具体 overload，不要 `overloads.forEach` 批量设置。
+- 批量全钩会把 `*ForUser`、带默认值等未预期的重载全部卷进来，转发逻辑无法
+  逐一核对，属于隐性破坏面。
+
+```javascript
+// 正确：精确签名 + 显式形参转发
+const getInt3 = C.getInt.overload('android.content.ContentResolver',
+                                  'java.lang.String', 'int');
+getInt3.implementation = function (cr, name, def) {
+  if (hit(name)) return 0;
+  return getInt3.call(C, cr, name, def);   // C 是类包装器
+};
+
+// 禁止：泛化全钩 + 泛化转发
+C.getInt.overloads.forEach(function (m) {
+  m.implementation = function () {
+    return m.apply(this, arguments);       // this 不可靠，重载未核对
+  };
+});
+```
+
+**2. 转发必须显式、receiver 必须正确**
+
+- 每个 overload 的 implementation 按其签名逐个形参转发；转发路径要么完全
+  正确、要么在编写时立即暴露，不允许"应该都能跑"的泛化写法。
+- 静态方法 receiver 一律用 `Java.use()` 返回的类包装器（见上一节示例）。
+
+**3. 回调内零多余开销**
+
+- 只有命中目标（需要改写/上报）时才执行 `console.log()`；纯转发路径
+  零 I/O、零额外 JNI 调用。
+- 观察类 Hook 必须先过滤再打印（按参数内容、线程名或模块归属过滤），
+  严禁对高频函数全量打日志——回调内的 I/O 会扰动目标时序，本身可能改变
+  目标行为。
+
+**4. 禁止兜底链，让失败响亮**
+
+- 不写多重符号名探测循环、`enumerateClassLoaders` 全量扫描式兜底。每个
+  动作只做一次、用确定的方式做。
+- `try/catch` 只包真正可能失败且必须继续的调用点；不允许把错误吞成一行
+  日志后继续跑——被吞掉的错误会让运行行为不可复现，也无法定位。
+- 需要容错的场景先想清楚"失败时应该发生什么"，再决定是否捕获。
+
+**5. 时机分层固定**
+
+- framework/boot 类：`Java.performNow()`，spawn 后立即武装。
+- app 自有类（含加固壳织入的类）：以壳/native 库的 `android_dlopen_ext`
+  装载回调为锚点武装（`onLeave` 中匹配目标库名）。锚点触发时发起加载的
+  app 类静态初始化正在当前线程执行，classloader 已就绪，用 `Java.perform()`
+  即可，不需要额外扫描。
+- 同一轮实验针对同一目标的 Hook 统一挂同一个锚点，不分散多个武装时机。
+- 禁止 `setTimeout`、轮询延时等定时加载方式（重复强调）。
+
+**6. 单文件、单变量、零残留**
+
+- 一个目标维护一个脚本文件；每轮实验只改一个变量：验证"参数修正输入"时，
+  撤掉所有拦截兜底，只留参数修正 + 观察哨，结果才能直接归因。
+- 每轮结束后检查文件中没有上一轮遗留的拦截/参数修正层——残留层与目标
+  fail-closed 行为叠加，会把结构性退出误判成"检测仍然生效"。
+
+**7. 符号与模块查询**
+
+- 已知模块的导出通过模块实例查询：
+
+```javascript
+const addr = Process.findModuleByName('libc.so')
+    .findExportByName('__system_property_get');
 ```
 
 ### 区分 Java.perform 时机
@@ -383,6 +463,37 @@ const openAddress = libc.findExportByName('open');
 - 父进程中的 Hook 不会自动覆盖 fork 或 spawn 出来的独立子进程。
 - 没有收到某个 Hook 回调，只能说明当前进程和当前地址没有命中该回调，不能单独证明目标
   行为没有发生，也不能单独判定为工具故障。
+- **被观测进程可能对 adb shell 的 `ps`/`pidof`/`grep` 完全不可见**（配套运行时按设计
+  不参与 /proc 枚举，root 也枚举不到）。判断依据：进程内脚本与按 uid 工作的观测工具
+  都正常，但任何外部进程枚举为空。此时不要在外部轮询 pid 浪费时间——`/proc/<pid>/maps`
+  一类数据只能进程内自取（见下节）。
+
+### 进程内自取 procfs 数据（外部不可见时）
+
+外部看不到目标进程时，maps 等快照从进程内读取并写到 app 自己的目录，随后用 root 拉回。
+
+**读与写**：使用 frida 原生 IO，不要用 `Java.registerClass` 或 Java 文件 API——
+加固目标上动态 dex 生成（`registerClass`）和 Java 文件 IO 都可能被直接拒绝
+（`Permission denied`）：
+
+```javascript
+const data = File.readAllBytes('/proc/self/maps');
+const f = new File('/data/data/<pkg>/files/self_maps.txt', 'wb');
+f.write(data);
+f.close();
+```
+
+**触发时机**：遵循锚点纪律，禁止 `setTimeout`。目标存在周期性调用时，Hook 该调用
+按计数触发快照（例如壳的轮询器第 1 次、第 7 次调用时各拍一份，分别对应早期与
+晚期完整状态）。注意与主 hook 脚本无冲突：主脚本只观察、未替换的方法，
+辅助脚本才可以替换它。
+
+**时机与作用域**：app 自有类的 Hook 要等壳/native 库 `android_dlopen_ext` 装载
+锚点，锚点内用 `Java.perform`（app classloader 已就绪）；`performNow` 在锚点处
+会因默认 classloader 看不到 app 类而抛 `ClassNotFoundException`。
+
+**与外部 trace 对账**：快照脚本打印 `Process.id`，事后与 trace 的主进程 pid
+比对，保证快照与 syscall 日志属于同一进程，否则归因价值很低。
 
 ## Toolkit 工具
 
@@ -438,7 +549,7 @@ uv run frida -H 127.0.0.1:27042 \
 - `uv run frida --version` 输出：
 
 ## 使用方式
-- 注入方式：spawn / attach
+- 加载方式：spawn / attach
 - 是否加载 `frida-java-bridge/_agent.js`：
 - 使用 `Java.perform()` 或 `Java.performNow()`：
 - Java ClassLoader：

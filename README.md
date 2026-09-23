@@ -33,7 +33,7 @@ README。普通用户按本 README 操作即可；实测文档只记录验证证
 
 | 文件 | 用途 |
 | --- | --- |
-| `frida-usb` | 激活、授权、启停设备端 server，并建立 ADB 转发 |
+| `frida-usb` | 激活、授权并启动设备端 server，并建立 ADB 转发 |
 | `frida-java-bridge/_agent.js` | Java 脚本需要同时加载的预构建 bridge |
 | `scripts/native-hook.js` | `libc.so!open` Native Hook 示例 |
 | `scripts/java-hook.js` | `Log.i(String, String)` Java Hook 示例 |
@@ -160,24 +160,21 @@ unset ACTIVATION_CODE
 激活成功后通常不需要重复执行。设备重启或内核模块重新加载后仍需重新授权，日常启动
 命令会自动完成授权。
 
-### 4. 启动、检查和停止
+### 4. 启动和检查
 
 ```bash
-./frida-usb start
+./frida-usb
 uv run frida-ps -H 127.0.0.1:27042
 ```
 
-`./frida-usb` 等同于 `./frida-usb start`。停止本次 server 和 ADB 转发：
-
-```bash
-./frida-usb stop
-```
+无参数运行会先执行一次设备端授权，再启动 server。没有独立的停止命令，再次运行
+`./frida-usb` 会自动清理旧实例和本地转发。
 
 需要切换本机端口时：
 
 ```bash
 export FRIDA_HOST_PORT="27043"
-./frida-usb start
+./frida-usb
 uv run frida-ps -H "127.0.0.1:$FRIDA_HOST_PORT"
 ```
 
@@ -267,7 +264,7 @@ const address = Module.findGlobalExportByName('target_function');
 | `adb was not found in PATH` | 安装 Android Platform Tools，并运行 `adb version` |
 | 多设备导致命令失败 | 用 `adb devices -l` 获取 serial，并设置 `ANDROID_SERIAL` |
 | `frida-ps` 连接失败 | 检查设备端日志与 ADB forward，然后停止并重新启动 |
-| `Interceptor.textShadow is unavailable` | 确认 arm64、内核模块已启用，并重新运行 `frida-usb start` 完成授权 |
+| `Interceptor.textShadow is unavailable` | 确认 arm64、内核模块已启用，并重新运行 `./frida-usb` 完成授权 |
 | `Java is not defined` | 确认同一条 CLI 命令先加载 `_agent.js`，再加载 Java 脚本 |
 | 找不到应用类 | 先使用 `Java.perform()`；动态类需选择实际 ClassLoader |
 
@@ -277,8 +274,7 @@ const address = Module.findGlobalExportByName('target_function');
 adb -s "$ANDROID_SERIAL" shell su -c \
   'cat /data/local/tmp/.fsrv-usb.log'
 adb -s "$ANDROID_SERIAL" forward --list
-./frida-usb stop
-./frida-usb start
+./frida-usb
 ```
 
 ## 验证边界

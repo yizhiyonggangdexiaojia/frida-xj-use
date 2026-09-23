@@ -10,7 +10,7 @@ log_file=/data/local/tmp/.fsrv-usb.log
 
 usage()
 {
-  echo "Usage: $0 [start|stop|--activate <ACTIVATION_CODE>]" >&2
+  echo "Usage: $0 [--activate UUID]" >&2
   exit 2
 }
 
@@ -29,63 +29,33 @@ run_adb()
   fi
 }
 
-stop_server()
-{
-  pid=$(run_adb shell "su -c 'cat \"$pid_file\" 2>/dev/null || true'" |
-    tr -d '\r' |
-    awk 'NR == 1 { print $1 }')
-
-  if [ -n "$pid" ]; then
-    run_adb shell "su -c 'kill \"$pid\" 2>/dev/null || true'" >/dev/null
-  fi
-
-  run_adb forward --remove "tcp:$host_port" >/dev/null 2>&1 || true
-  run_adb shell "su -c 'rm -f \"$pid_file\" \"$log_file\"'" >/dev/null
-}
-
 if [ "$#" -eq 2 ] && [ "$1" = "--activate" ]; then
-  activation_code=$2
-  if ! printf '%s\n' "$activation_code" |
-      grep -Eq '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'; then
-    echo "Activation code must be a UUID" >&2
-    exit 2
-  fi
-
-  echo "Activating the device-side server"
-  run_adb shell "su -c '\"$device_binary\" --activate \"$activation_code\"'"
+  echo "Running: $device_binary --activate $2"
+  run_adb shell "su -c '\"$device_binary\" --activate \"$2\"'"
   exit 0
 fi
 
-action=${1:-start}
-[ "$#" -le 1 ] || usage
+[ "$#" -eq 0 ] || usage
 
-case "$action" in
-  start)
-    echo "Authorizing the kernel module"
-    run_adb shell "su -c '\"$device_binary\" --authorize-kpm'"
+echo "Running: $device_binary --authorize-kpm"
+run_adb shell "su -c '\"$device_binary\" --authorize-kpm'"
 
-    stop_server
-    socket_name=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+pid=$(run_adb shell "su -c 'cat \"$pid_file\" 2>/dev/null || true'" |
+  tr -d '\r' |
+  awk 'NR == 1 { print $1 }')
+[ -n "$pid" ] && run_adb shell "su -c 'kill \"$pid\" 2>/dev/null || true'" >/dev/null
+run_adb forward --remove "tcp:$host_port" >/dev/null 2>&1 || true
+run_adb shell "su -c 'rm -f \"$pid_file\" \"$log_file\"'" >/dev/null
 
-    run_adb shell "su -c 'nohup \"$device_binary\" --listen \"unix:$socket_name\" >\"$log_file\" 2>&1 & echo \$! >\"$pid_file\"'"
-    run_adb forward "tcp:$host_port" "localabstract:$socket_name" >/dev/null
+socket_name=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+run_adb shell "su -c 'nohup \"$device_binary\" --listen \"unix:$socket_name\" >\"$log_file\" 2>&1 & echo \$! >\"$pid_file\"'"
+run_adb forward "tcp:$host_port" "localabstract:$socket_name" >/dev/null
 
-    sleep 1
-    if ! run_adb shell "su -c 'grep -Fq \"@$socket_name\" /proc/net/unix'" >/dev/null 2>&1; then
-      run_adb shell "su -c 'cat \"$log_file\"'" >&2 || true
-      exit 1
-    fi
+sleep 1
+if ! run_adb shell "su -c 'grep -Fq \"@$socket_name\" /proc/net/unix'" >/dev/null 2>&1; then
+  run_adb shell "su -c 'cat \"$log_file\"'" >&2 || true
+  exit 1
+fi
 
-    echo "Frida USB transport is ready on 127.0.0.1:$host_port"
-    echo "Device binary: $device_binary"
-    ;;
-
-  stop)
-    stop_server
-    echo "Frida USB transport stopped"
-    ;;
-
-  *)
-    usage
-    ;;
-esac
+echo "Frida USB transport is ready on 127.0.0.1:$host_port"
+echo "Device binary: $device_binary"
